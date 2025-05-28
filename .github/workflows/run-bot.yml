@@ -10,49 +10,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          wget unzip xvfb \
-          libnss3 libxss1 libasound2t64 \
-          fonts-liberation libappindicator3-1 xdg-utils
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget unzip xvfb \
+            libnss3 libxss1 libasound2 \
+            fonts-liberation libappindicator3-1 xdg-utils
 
-    - name: Install Python dependencies
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
+      # ← Вот здесь добавляем установку Chrome и экспорт CHROME_MAJOR
+      - name: Install Google Chrome and export CHROME_MAJOR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
 
-    - name: Run bot
-      env:
-        OK_EMAIL: ${{ secrets.OK_EMAIL }}
-        OK_PASSWORD: ${{ secrets.OK_PASSWORD }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
-      run: |
-        Xvfb :99 -screen 0 1920x1080x24 &
-        export DISPLAY=:99
-        python bot.py
+          # Получаем полную версию, например "136.0.7103.0"
+          CHROME_FULL_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          echo "Full Chrome version: $CHROME_FULL_VERSION"
 
-    - name: Upload bot log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: bot-log
-        path: bot.log
+          # Извлекаем мэйджор-версию (до первой точки)
+          CHROME_MAJOR=${CHROME_FULL_VERSION%%.*}
+          echo "Major Chrome version: $CHROME_MAJOR"
 
-    - name: Upload screenshots
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: screenshots
-        path: |
-          *.png
+          # Пробрасываем в среду Actions для следующих шагов
+          echo "CHROME_MAJOR=$CHROME_MAJOR" >> $GITHUB_ENV
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          OK_EMAIL: ${{ secrets.OK_EMAIL }}
+          OK_PASSWORD: ${{ secrets.OK_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          export DISPLAY=:99
+          python bot.py
+
+      - name: Upload bot log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-log
+          path: bot.log
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: '*.png'
