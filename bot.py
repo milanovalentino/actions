@@ -69,7 +69,7 @@ def try_confirm_identity():
         btn = wait.until(EC.element_to_be_clickable((By.XPATH,
             "//input[@value='Yes, confirm']"
             " | //button[contains(text(),'Yes, confirm')]"
-            " | //button[contains(text(),'Да, это я')"]
+            " | //button[contains(text(),'Да, это я')]"
         )))
         btn.click()
         logger.info("🔓 Подтверждена личность")
