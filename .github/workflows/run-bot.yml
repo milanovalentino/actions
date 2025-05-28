@@ -1,38 +1,58 @@
-name: health-dashboard
+name: Run OK Bot
+
 on:
   workflow_dispatch:
   schedule:
-    - cron:  '30 4 * * *'
+    - cron: '0 8 * * *'
+
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v2
-      - name: Generate Dashboard
-        id: dashboard
-        uses: GH-ACE/issue-dashboard@v1
-        with:
-          config: ./dashboard-config/health-dashboard-config.yml
-          configType: file
-          token: "${{ github.token }}"
-      - name: Commit files
-        id: commit
-        continue-on-error: true
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git pull
-          git add --all
-          if [-z "$(git status --porcelain)"]; then
-             echo "::set-output name=push::false"
-          else
-             git commit -m "Add changes" -a
-             echo "::set-output name=push::true"
-          fi
-        shell: bash
-      - name: Push changes
-        if: steps.commit.outputs.push == 'true'
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: "${{ secrets.GITHUB_TOKEN }}"
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          wget unzip xvfb \
+          libnss3 libxss1 libasound2t64 \
+          fonts-liberation libappindicator3-1 xdg-utils
+
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run bot
+      env:
+        OK_EMAIL: ${{ secrets.OK_EMAIL }}
+        OK_PASSWORD: ${{ secrets.OK_PASSWORD }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+      run: |
+        Xvfb :99 -screen 0 1920x1080x24 &
+        export DISPLAY=:99
+        python bot.py
+
+    - name: Upload bot log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: bot-log
+        path: bot.log
+
+    - name: Upload screenshots
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: screenshots
+        path: |
+          *.png
