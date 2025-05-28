@@ -10,6 +10,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
+# Если используется GitHub Actions, в workflow добавьте установку Chrome и экспортуйте CHROME_MAJOR
+# Например: echo "CHROME_MAJOR=136" >> $GITHUB_ENV
+
 # Чтение учётных данных из окружения
 EMAIL = os.environ.get("OK_EMAIL")
 PASSWORD = os.environ.get("OK_PASSWORD")
@@ -51,8 +54,11 @@ def init_driver():
     opts.add_argument('--disable-dev-shm-usage')
     opts.add_argument('--disable-gpu')
     opts.add_argument('--window-size=1920,1080')
-    return uc.Chrome(options=opts)
+    # Подставляем мэйджор-версию ChromeDriver из переменной окружения (fallback=136)
+    version_main = int(os.getenv("CHROME_MAJOR", "136"))
+    return uc.Chrome(options=opts, version_main=version_main)
 
+# Запуск драйвера
 driver = init_driver()
 wait = WebDriverWait(driver, 20)
 
@@ -69,7 +75,7 @@ def try_confirm_identity():
     except Exception:
         logger.info("ℹ️ Страница 'It's you' не показана.")
 
-# 2) Получение SMS-кода из Telegram с таймаутом 120s
+# 2) Получение SMS-кода из Telegram
 def retrieve_sms_code(timeout=120, poll_interval=5):
     api_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
     last_update = None
@@ -83,7 +89,7 @@ def retrieve_sms_code(timeout=120, poll_interval=5):
         last_update = None
 
     deadline = time.time() + timeout
-    logger.info(f"⏳ Ожидание SMS-кода (#код 123456 или 123456), таймаут {timeout}s...")
+    logger.info(f"⏳ Ожидание SMS-кода, таймаут {timeout}s...")
     while time.time() < deadline:
         try:
             resp = requests.get(api_url, params={'timeout':0,'offset': last_update}).json()
@@ -114,7 +120,6 @@ def retrieve_sms_code(timeout=120, poll_interval=5):
 # 3) Проверка логина по data-l и SMS-верификация
 def try_sms_verification():
     try:
-        # Проверяем data-l в <body> для авторизации
         data_l = driver.find_element(By.TAG_NAME, 'body').get_attribute('data-l') or ''
         if 'userMain' in data_l and 'anonymMain' not in data_l:
             logger.info("✅ По data-l пользователь залогинен, SMS не требуется.")
@@ -122,7 +127,6 @@ def try_sms_verification():
         else:
             logger.info("🔄 Пользователь аноним, начинаем SMS-верификацию.")
 
-        # Запрос SMS-кода
         driver.save_screenshot("sms_verification_page.png")
         btn = wait.until(EC.element_to_be_clickable((By.XPATH,
             "//input[@type='submit' and @value='Get code']"
@@ -131,7 +135,6 @@ def try_sms_verification():
         logger.info("📲 'Get code' нажат, SMS-код запрошен.")
         driver.save_screenshot("sms_requested.png")
 
-        # Проверка ограничения частых запросов
         time.sleep(1)
         body_text = driver.find_element(By.TAG_NAME, 'body').text.lower()
         if "you are performing this action too often" in body_text:
@@ -139,7 +142,6 @@ def try_sms_verification():
             driver.save_screenshot("sms_rate_limit.png")
             sys.exit(1)
 
-        # Получение и ввод кода
         inp = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH,
             "//input[@id='smsCode' or contains(@name,'smsCode')]"
         )))
@@ -150,7 +152,6 @@ def try_sms_verification():
         logger.info(f"✍️ Код введён: {code}")
         driver.save_screenshot("sms_code_entered.png")
 
-        # Подтверждение кода
         next_btn = driver.find_element(By.XPATH,
             "//input[@type='submit' and @value='Next']"
         )
@@ -174,12 +175,10 @@ if __name__=='__main__':
         driver.get("https://ok.ru/")
         driver.save_screenshot("login_page.png")
 
-        # Ввод учётных данных
         wait.until(EC.presence_of_element_located((By.NAME,'st.email'))).send_keys(EMAIL)
         driver.find_element(By.NAME,'st.password').send_keys(PASSWORD)
         driver.save_screenshot("credentials_entered.png")
 
-        # Отправка формы логина
         logger.info("🔑 Отправляю форму логина...")
         driver.find_element(By.XPATH, "//input[@type='submit']").click()
         time.sleep(2)
