@@ -2,8 +2,6 @@ name: Run OK Bot
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 8 * * *'
 
 jobs:
   run-bot:
@@ -26,21 +24,15 @@ jobs:
             libnss3 libxss1 libasound2t64 \
             fonts-liberation libappindicator3-1 xdg-utils
 
-      # ← Вот здесь добавляем установку Chrome и экспорт CHROME_MAJOR
       - name: Install Google Chrome and export CHROME_MAJOR
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
-          # Получаем полную версию, например "136.0.7103.0"
           CHROME_FULL_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
           echo "Full Chrome version: $CHROME_FULL_VERSION"
-
-          # Извлекаем мэйджор-версию (до первой точки)
           CHROME_MAJOR=${CHROME_FULL_VERSION%%.*}
           echo "Major Chrome version: $CHROME_MAJOR"
-
-          # Пробрасываем в среду Actions для следующих шагов
           echo "CHROME_MAJOR=$CHROME_MAJOR" >> $GITHUB_ENV
 
       - name: Install Python dependencies
