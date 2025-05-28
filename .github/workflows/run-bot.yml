@@ -1,5 +1,10 @@
 name: Run OK Bot
 
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * *'
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
