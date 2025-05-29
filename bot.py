@@ -333,7 +333,7 @@ def retrieve_post_info(poll=5):
         
         time.sleep(poll)
 
-# Постинг в группу (с поддержкой загрузки файла) !!!
+# Постинг в группу (с улучшенной проверкой загрузки через активность кнопки Share)
 def post_to_group(group_url, video_file=None, video_url=None, text=""):
     post_url = group_url.rstrip('/') + '/post'
     logger.info("🚀 Открываю страницу постинга")
@@ -355,6 +355,11 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
                 logger.info(f"📤 Начинаю загрузку видеофайла: {video_file}")
                 file_size = os.path.getsize(video_file)
                 logger.info(f"📁 Размер файла: {file_size} байт")
+                
+                # Проверяем начальное состояние кнопки Share (должна быть неактивна)
+                share_button = driver.find_element(By.CSS_SELECTOR, "button.js-pf-submit-btn[data-action='submit']")
+                initial_disabled = share_button.get_attribute("disabled") is not None
+                logger.info(f"🔘 Начальное состояние кнопки Share: {'отключена' if initial_disabled else 'активна'}")
                 
                 # Шаг 1: Находим и кликаем кнопку "Video"
                 video_button_selectors = [
@@ -414,132 +419,85 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
                 upload_input.send_keys(video_file)
                 
                 # Увеличиваем время ожидания для больших файлов
-                wait_time = min(60, max(15, file_size // (1024 * 1024)))  # 1 сек на MB, мин 15, макс 60
-                logger.info(f"⏳ Жду загрузки файла ({wait_time} сек)...")
+                wait_time = min(120, max(30, file_size // (512 * 1024)))  # 1 сек на 512KB, мин 30, макс 120
+                logger.info(f"⏳ Жду активации кнопки Share ({wait_time} сек)...")
                 
-                # Проверяем успешную загрузку
+                # Основная проверка: ждем когда кнопка Share станет активной
                 upload_success = False
-                initial_check_passed = False
-                
                 for i in range(wait_time):
                     try:
-                        # Сначала проверяем, что файл начал загружаться (исчез input или появился прогресс)
-                        if not initial_check_passed:
-                            upload_elements = driver.find_elements(By.CSS_SELECTOR, ".js-fileapi-input.video-upload-input")
-                            progress_elements = driver.find_elements(By.CSS_SELECTOR, ".upload-progress, .progress, [class*='progress'], .loading")
-                            
-                            if not upload_elements or progress_elements:
-                                initial_check_passed = True
-                                logger.info("✅ Загрузка началась")
+                        # Обновляем ссылку на кнопку Share
+                        share_button = driver.find_element(By.CSS_SELECTOR, "button.js-pf-submit-btn[data-action='submit']")
+                        is_disabled = share_button.get_attribute("disabled") is not None
                         
-                        # Ищем более широкий спектр индикаторов успешной загрузки
-                        success_selectors = [
-                            # Стандартные селекторы
-                            ".video-upload-success",
-                            ".upload-complete", 
-                            ".video-preview",
-                            ".media-preview",
-                            "div[data-state='uploaded']",
-                            ".upload-progress[style*='100%']",
-                            # Селекторы для OK.ru
-                            ".video-card",
-                            ".vid-card", 
-                            ".media-card",
-                            ".attachment-video",
-                            "div[class*='video'][class*='card']",
-                            "div[class*='media'][class*='preview']",
-                            # Кнопки, которые появляются после загрузки
-                            "button[data-action='submit']:enabled",
-                            ".button-pro[data-action='submit']:enabled",
-                            "input[type='submit']:enabled"
-                        ]
-                        
-                        for selector in success_selectors:
-                            elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                            if elements:
-                                # Дополнительная проверка - элемент должен быть видимым
-                                for elem in elements:
-                                    if elem.is_displayed():
-                                        upload_success = True
-                                        logger.info(f"✅ Найден индикатор успешной загрузки: {selector}")
-                                        break
-                                if upload_success:
-                                    break
-                        
-                        if upload_success:
+                        # Если кнопка стала активной (нет атрибута disabled)
+                        if not is_disabled:
+                            upload_success = True
+                            logger.info("✅ Кнопка Share активирована - видео загружено!")
                             break
-                            
-                        # Проверяем, нет ли ошибок загрузки
+                        
+                        # Дополнительно проверяем на ошибки загрузки
                         error_selectors = [
                             ".upload-error",
-                            ".error-message", 
+                            ".error-message",
                             "div[data-state='error']",
-                            ".error",
-                            "[class*='error']"
+                            ".js-upload-error"
                         ]
                         
                         for selector in error_selectors:
                             error_elements = driver.find_elements(By.CSS_SELECTOR, selector)
                             if error_elements:
-                                for error_elem in error_elements:
-                                    if error_elem.is_displayed() and error_elem.text.strip():
-                                        error_text = error_elem.text
-                                        logger.error(f"❌ Ошибка загрузки: {error_text}")
-                                        take_screenshot("upload_error")
-                                        return
+                                error_text = error_elements[0].text
+                                logger.error(f"❌ Ошибка загрузки: {error_text}")
+                                take_screenshot("upload_error")
+                                return
                         
                         time.sleep(1)
                         
-                        # Логируем прогресс каждые 10 секунд
-                        if i % 10 == 0 and i > 0:
-                            logger.info(f"⏳ Загрузка... ({i}/{wait_time} сек)")
+                        # Логируем прогресс каждые 15 секунд
+                        if i % 15 == 0 and i > 0:
+                            logger.info(f"⏳ Ожидание активации кнопки Share... ({i}/{wait_time} сек)")
                             
                     except Exception as e:
-                        logger.warning(f"⚠️ Ошибка при проверке статуса загрузки: {e}")
+                        logger.warning(f"⚠️ Ошибка при проверке кнопки Share: {e}")
                         time.sleep(1)
                         continue
                 
-                # Если не нашли явных индикаторов, но загрузка началась - считаем успешной
-                if not upload_success and initial_check_passed:
-                    logger.info("✅ Загрузка началась, считаем успешной (индикаторы не найдены)")
-                    upload_success = True
-                
                 if upload_success:
-                    logger.info("✅ Видеофайл успешно загружен")
+                    logger.info("✅ Видеофайл успешно загружен (кнопка Share активна)")
                     
-                    # Ищем кнопку для подтверждения/закрытия модального окна
+                    # Пытаемся закрыть модальное окно если оно есть
                     modal_close_selectors = [
                         "button[data-action='close']",
                         "button[data-action='submit']",
                         ".button-pro[data-action='submit']",
                         ".modal-footer button",
                         "button.js-submit",
-                        "button:enabled"
+                        ".modal-close"
                     ]
                     
                     for selector in modal_close_selectors:
                         try:
-                            close_buttons = driver.find_elements(By.CSS_SELECTOR, selector)
-                            for close_button in close_buttons:
+                            close_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for close_button in close_elements:
                                 if close_button.is_displayed() and close_button.is_enabled():
-                                    close_button.click()
-                                    logger.info("✅ Модальное окно закрыто")
-                                    time.sleep(2)
-                                    break
-                            else:
-                                continue
-                            break
+                                    # Проверяем, что это не кнопка Share
+                                    if "js-pf-submit-btn" not in close_button.get_attribute("class"):
+                                        close_button.click()
+                                        logger.info("✅ Модальное окно закрыто")
+                                        time.sleep(2)
+                                        break
                         except:
                             continue
                 else:
-                    logger.warning("⚠️ Не дождался подтверждения загрузки видео")
-                    analyze_upload_state()  # Анализируем состояние страницы
-                    take_screenshot("video_upload_timeout")
-                    # Не возвращаемся, продолжаем выполнение - возможно загрузка все же прошла
+                    logger.error("❌ Кнопка Share не активировалась - загрузка видео не завершена")
+                    take_screenshot("share_button_not_activated")
+                    return
                     
             except Exception as e:
                 logger.error(f"❌ Ошибка загрузки видеофайла: {e}")
                 take_screenshot("video_upload_error")
+                return
         
         # Если есть ссылка на видео, вставляем её
         elif video_url:
@@ -548,30 +506,27 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
             box.send_keys(Keys.SPACE)
             logger.info("✍️ Ссылка на видео вставлена")
             
-            # Ждём появление карточки превью
-            attached = False
-            for i in range(10):
-                preview_selectors = [
-                    "div.vid-card.vid-card__xl",
-                    "div.mediaPreview", 
-                    "div.mediaFlex", 
-                    "div.preview_thumb"
-                ]
-                
-                for selector in preview_selectors:
-                    if driver.find_elements(By.CSS_SELECTOR, selector):
-                        attached = True
+            # Ждём когда кнопка Share станет активной (это означает что превью загрузилось)
+            logger.info("⏳ Жду активации кнопки Share для ссылки на видео...")
+            link_processed = False
+            for i in range(15):  # 15 секунд для ссылки должно хватить
+                try:
+                    share_button = driver.find_element(By.CSS_SELECTOR, "button.js-pf-submit-btn[data-action='submit']")
+                    is_disabled = share_button.get_attribute("disabled") is not None
+                    
+                    if not is_disabled:
+                        link_processed = True
+                        logger.info("✅ Кнопка Share активирована - ссылка обработана!")
                         break
+                    
+                    time.sleep(1)
+                except:
+                    time.sleep(1)
+                    continue
                 
-                if attached:
-                    break
-                time.sleep(1)
-                
-            if attached:
-                logger.info("✅ Видео-карта появилась")
-            else:
-                logger.warning(f"⚠️ Не дождался карточки видео за 10 сек на {group_url}")
-                take_screenshot("video_card_timeout")
+            if not link_processed:
+                logger.warning("⚠️ Кнопка Share не активировалась для ссылки")
+                take_screenshot("link_not_processed")
 
         # Добавляем текст
         if text:
@@ -589,33 +544,20 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
             except Exception as e:
                 logger.error(f"❌ Ошибка добавления текста: {e}")
 
-        # Публикуем
+        # Финальная проверка активности кнопки Share перед публикацией
         try:
-            publish_selectors = [
-                "button.js-pf-submit-btn[data-action='submit']",
-                "button[data-action='submit']",
-                "input[type='submit'][value*='публиковать']",
-                "input[type='submit'][value*='Публиковать']",
-                "button[type='submit']",
-                ".posting_submit input[type='submit']"
-            ]
+            share_button = driver.find_element(By.CSS_SELECTOR, "button.js-pf-submit-btn[data-action='submit']")
+            is_disabled = share_button.get_attribute("disabled") is not None
             
-            btn = None
-            for selector in publish_selectors:
-                try:
-                    btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                    if btn.is_displayed() and btn.is_enabled():
-                        break
-                except:
-                    continue
+            if is_disabled:
+                logger.error("❌ Кнопка Share неактивна - не могу опубликовать")
+                take_screenshot("share_button_disabled_before_publish")
+                return
             
-            if btn:
-                btn.click()
-                logger.info("✅ Опубликовано")
-                time.sleep(5)  # Даем время на публикацию
-            else:
-                logger.error("❌ Не найдена кнопка публикации")
-                take_screenshot("no_publish_button")
+            # Публикуем
+            share_button.click()
+            logger.info("✅ Опубликовано")
+            time.sleep(5)  # Даем время на публикацию
                 
         except Exception as e:
             logger.error(f"❌ Ошибка публикации: {e}")
@@ -624,7 +566,7 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
     except Exception as e:
         logger.error(f"❌ Общая ошибка постинга в группу {group_url}: {e}")
         take_screenshot("post_general_error")
-
+        
 # Основной поток
 def main():
     try:
