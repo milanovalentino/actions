@@ -1,21 +1,17 @@
 name: Run OK Bot
-
 on:
   workflow_dispatch:
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 45  # Увеличиваем время для загрузки видео
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -23,41 +19,59 @@ jobs:
             wget unzip xvfb \
             libnss3 libxss1 libasound2t64 \
             fonts-liberation libappindicator3-1 xdg-utils
-
       - name: Install Google Chrome and export CHROME_MAJOR
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
-
           CHROME_FULL_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
           echo "Full Chrome version: $CHROME_FULL_VERSION"
           CHROME_MAJOR=${CHROME_FULL_VERSION%%.*}
           echo "Major Chrome version: $CHROME_MAJOR"
           echo "CHROME_MAJOR=$CHROME_MAJOR" >> $GITHUB_ENV
-
+      - name: Check disk space and create temp directories
+        run: |
+          echo "=== Disk space before start ==="
+          df -h
+          echo "=== Creating temp directories ==="
+          mkdir -p /tmp/bot_videos
+          chmod 755 /tmp/bot_videos
+          echo "TEMP_VIDEO_DIR=/tmp/bot_videos" >> $GITHUB_ENV
+          echo "=== Available space in temp dir ==="
+          df -h /tmp
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Run bot
         env:
           OK_EMAIL: ${{ secrets.OK_EMAIL }}
           OK_PASSWORD: ${{ secrets.OK_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_USER_ID: ${{ secrets.TELEGRAM_USER_ID }}
+          TEMP_VIDEO_DIR: /tmp/bot_videos
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
           export DISPLAY=:99
           python bot.py
-
+      - name: Check final disk usage
+        if: always()
+        run: |
+          echo "=== Final disk usage ==="
+          df -h
+          echo "=== Contents of temp directory ==="
+          ls -la /tmp/bot_videos/ || echo "Temp directory not found or empty"
+      - name: Cleanup temp files
+        if: always()
+        run: |
+          echo "=== Cleaning up temporary files ==="
+          rm -rf /tmp/bot_videos
+          echo "=== Cleanup completed ==="
       - name: Upload bot log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-log
           path: bot.log
-
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
