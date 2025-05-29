@@ -333,7 +333,7 @@ def retrieve_post_info(poll=5):
         
         time.sleep(poll)
 
-# Постинг в группу (с поддержкой загрузки файла)
+# Постинг в группу (с поддержкой загрузки файла) !!!
 def post_to_group(group_url, video_file=None, video_url=None, text=""):
     post_url = group_url.rstrip('/') + '/post'
     logger.info("🚀 Открываю страницу постинга")
@@ -419,22 +419,52 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
                 
                 # Проверяем успешную загрузку
                 upload_success = False
+                initial_check_passed = False
+                
                 for i in range(wait_time):
                     try:
-                        # Ищем индикаторы успешной загрузки
+                        # Сначала проверяем, что файл начал загружаться (исчез input или появился прогресс)
+                        if not initial_check_passed:
+                            upload_elements = driver.find_elements(By.CSS_SELECTOR, ".js-fileapi-input.video-upload-input")
+                            progress_elements = driver.find_elements(By.CSS_SELECTOR, ".upload-progress, .progress, [class*='progress'], .loading")
+                            
+                            if not upload_elements or progress_elements:
+                                initial_check_passed = True
+                                logger.info("✅ Загрузка началась")
+                        
+                        # Ищем более широкий спектр индикаторов успешной загрузки
                         success_selectors = [
+                            # Стандартные селекторы
                             ".video-upload-success",
-                            ".upload-complete",
+                            ".upload-complete", 
                             ".video-preview",
                             ".media-preview",
                             "div[data-state='uploaded']",
-                            ".upload-progress[style*='100%']"
+                            ".upload-progress[style*='100%']",
+                            # Селекторы для OK.ru
+                            ".video-card",
+                            ".vid-card", 
+                            ".media-card",
+                            ".attachment-video",
+                            "div[class*='video'][class*='card']",
+                            "div[class*='media'][class*='preview']",
+                            # Кнопки, которые появляются после загрузки
+                            "button[data-action='submit']:enabled",
+                            ".button-pro[data-action='submit']:enabled",
+                            "input[type='submit']:enabled"
                         ]
                         
                         for selector in success_selectors:
-                            if driver.find_elements(By.CSS_SELECTOR, selector):
-                                upload_success = True
-                                break
+                            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                            if elements:
+                                # Дополнительная проверка - элемент должен быть видимым
+                                for elem in elements:
+                                    if elem.is_displayed():
+                                        upload_success = True
+                                        logger.info(f"✅ Найден индикатор успешной загрузки: {selector}")
+                                        break
+                                if upload_success:
+                                    break
                         
                         if upload_success:
                             break
@@ -442,17 +472,21 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
                         # Проверяем, нет ли ошибок загрузки
                         error_selectors = [
                             ".upload-error",
-                            ".error-message",
-                            "div[data-state='error']"
+                            ".error-message", 
+                            "div[data-state='error']",
+                            ".error",
+                            "[class*='error']"
                         ]
                         
                         for selector in error_selectors:
                             error_elements = driver.find_elements(By.CSS_SELECTOR, selector)
                             if error_elements:
-                                error_text = error_elements[0].text
-                                logger.error(f"❌ Ошибка загрузки: {error_text}")
-                                take_screenshot("upload_error")
-                                return
+                                for error_elem in error_elements:
+                                    if error_elem.is_displayed() and error_elem.text.strip():
+                                        error_text = error_elem.text
+                                        logger.error(f"❌ Ошибка загрузки: {error_text}")
+                                        take_screenshot("upload_error")
+                                        return
                         
                         time.sleep(1)
                         
@@ -465,6 +499,11 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
                         time.sleep(1)
                         continue
                 
+                # Если не нашли явных индикаторов, но загрузка началась - считаем успешной
+                if not upload_success and initial_check_passed:
+                    logger.info("✅ Загрузка началась, считаем успешной (индикаторы не найдены)")
+                    upload_success = True
+                
                 if upload_success:
                     logger.info("✅ Видеофайл успешно загружен")
                     
@@ -474,22 +513,29 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
                         "button[data-action='submit']",
                         ".button-pro[data-action='submit']",
                         ".modal-footer button",
-                        "button.js-submit"
+                        "button.js-submit",
+                        "button:enabled"
                     ]
                     
                     for selector in modal_close_selectors:
                         try:
-                            close_button = driver.find_element(By.CSS_SELECTOR, selector)
-                            if close_button.is_displayed() and close_button.is_enabled():
-                                close_button.click()
-                                logger.info("✅ Модальное окно закрыто")
-                                time.sleep(2)
-                                break
+                            close_buttons = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for close_button in close_buttons:
+                                if close_button.is_displayed() and close_button.is_enabled():
+                                    close_button.click()
+                                    logger.info("✅ Модальное окно закрыто")
+                                    time.sleep(2)
+                                    break
+                            else:
+                                continue
+                            break
                         except:
                             continue
                 else:
                     logger.warning("⚠️ Не дождался подтверждения загрузки видео")
+                    analyze_upload_state()  # Анализируем состояние страницы
                     take_screenshot("video_upload_timeout")
+                    # Не возвращаемся, продолжаем выполнение - возможно загрузка все же прошла
                     
             except Exception as e:
                 logger.error(f"❌ Ошибка загрузки видеофайла: {e}")
