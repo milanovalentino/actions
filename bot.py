@@ -64,6 +64,8 @@ def init_driver():
     opts.add_argument('--disable-plugins')
     opts.add_argument('--disable-web-security')
     opts.add_argument('--allow-running-insecure-content')
+    opts.add_argument('--disable-popup-blocking')
+    opts.add_argument('--disable-notifications')
     
     # Настройки для загрузки файлов
     temp_dir = os.getenv('TEMP_VIDEO_DIR', tempfile.gettempdir())
