@@ -111,6 +111,65 @@ def take_screenshot(name="error"):
         logger.error(f"❌ Не удалось создать скриншот: {e}")
         return None
 
+# Отправка ссылки на пост в Telegram
+def send_post_link_to_telegram(post_link):
+    try:
+        full_url = f"https://ok.ru{post_link}" if post_link.startswith('/') else post_link
+        message = f"✅ Пост опубликован: {full_url}"
+        
+        api_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        response = requests.post(api_url, data={
+            "chat_id": TELEGRAM_USER_ID, 
+            "text": message
+        })
+        
+        if response.json().get('ok'):
+            logger.info(f"📤 Ссылка отправлена в Telegram: {full_url}")
+        else:
+            logger.error(f"❌ Ошибка отправки в Telegram: {response.text}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки ссылки в Telegram: {e}")
+
+# Поиск ссылки на опубликованный пост
+def wait_for_post_link(timeout=30):
+    try:
+        logger.info("⏳ Ищу ссылку на опубликованный пост...")
+        
+        # Ждем появления уведомления о публикации
+        tip_selectors = [
+            "#hook_Block_TipBlock .js-tip-block-url",
+            ".tip-block_lk a.js-tip-block-url",
+            ".action-tip a[href*='/topic/']",
+            ".toast a[href*='/topic/']"
+        ]
+        
+        for i in range(timeout):
+            for selector in tip_selectors:
+                try:
+                    link_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for link_element in link_elements:
+                        if link_element.is_displayed():
+                            post_link = link_element.get_attribute("href")
+                            if post_link and "/topic/" in post_link:
+                                logger.info(f"✅ Найдена ссылка на пост: {post_link}")
+                                return post_link
+                except:
+                    continue
+            
+            time.sleep(1)
+            
+            # Логируем прогресс каждые 10 секунд
+            if i % 10 == 0 and i > 0:
+                logger.info(f"⏳ Поиск ссылки на пост... ({i}/{timeout} сек)")
+        
+        logger.warning("⚠️ Ссылка на пост не найдена в течение таймаута")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка поиска ссылки на пост: {e}")
+        return None
+
 # Подтверждение личности, если требуется
 def try_confirm_identity():
     try:
@@ -557,6 +616,14 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
             # Публикуем
             share_button.click()
             logger.info("✅ Опубликовано")
+            
+            # Ищем ссылку на опубликованный пост
+            post_link = wait_for_post_link(timeout=30)
+            if post_link:
+                send_post_link_to_telegram(post_link)
+            else:
+                logger.warning("⚠️ Не удалось получить ссылку на пост")
+            
             time.sleep(5)  # Даем время на публикацию
                 
         except Exception as e:
@@ -584,8 +651,13 @@ def main():
         groups = retrieve_groups()
         video_file, video_url, post_text = retrieve_post_info()
         
-        for g in groups:
+        for i, g in enumerate(groups, 1):
+            logger.info(f"📝 Публикую в группу {i}/{len(groups)}: {g}")
             post_to_group(g, video_file, video_url, post_text)
+    
+    # Небольшая пауза между публикациями в разные группы
+    if i < len(groups):
+        time.sleep(3)
         
         # Удаляем временный файл, если он был создан
         if video_file and os.path.exists(video_file):
