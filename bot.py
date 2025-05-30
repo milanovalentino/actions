@@ -139,8 +139,8 @@ def wait_for_post_link(timeout=30):
         for i in range(timeout):
             for selector in tip_selectors:
                 try:
-                    els = driver.find_elements(By.CSS_SELECTOR, selector)
-                    for el in els:
+                    elems = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for el in elems:
                         if el.is_displayed():
                             link = el.get_attribute("href")
                             if link and "/topic/" in link:
@@ -157,8 +157,55 @@ def wait_for_post_link(timeout=30):
         logger.error(f"❌ Ошибка поиска ссылки на пост: {e}")
         return None
 
-# ... остальные функции try_confirm_identity, retrieve_sms_code и т.д. остаются без изменений ...
+# Подтверждение личности, если требуется
+def try_confirm_identity():
+    try:
+        btn = wait.until(EC.element_to_be_clickable((By.XPATH,
+            "//input[@value='Yes, confirm']"
+            " | //button[contains(text(),'Yes, confirm')]"
+            " | //button[contains(text(),'Да, это я')]"
+        )))
+        btn.click()
+        logger.info("🔓 Подтверждена личность")
+        time.sleep(1)
+    except Exception:
+        logger.info("ℹ️ Страница подтверждения личности не показана")
 
+# ... остальной код без изменений до функции post_to_group ...
+
+def post_to_group(group_url, video_file=None, video_url=None, text=""):
+    post_url = group_url.rstrip('/') + '/post'
+    logger.info("🚀 Открываю страницу постинга")
+    try:
+        driver.get(post_url)
+        time.sleep(3)
+        box = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR,
+            "div[contenteditable='true']"
+        )))
+        box.click()
+        # ... код загрузки видео или вставки ссылки и текста ...
+        # Финальная проверка и публикация
+        share_button = driver.find_element(By.CSS_SELECTOR, "button.js-pf-submit-btn[data-action='submit']")
+        is_disabled = share_button.get_attribute("disabled") is not None
+        if is_disabled:
+            logger.error("❌ Кнопка Share неактивна - не могу опубликовать")
+            take_screenshot("share_button_disabled_before_publish")
+            return
+        # Публикуем и обрабатываем ссылку
+        share_button.click()
+        logger.info("✅ Опубликовано")
+        # Ищем ссылку на опубликованный пост
+        post_link = wait_for_post_link(timeout=30)
+        if post_link:
+            send_post_link_to_telegram(post_link)
+        else:
+            logger.warning("⚠️ Не удалось получить ссылку на пост")
+        time.sleep(5)
+    except Exception as e:
+        logger.error(f"❌ Общая ошибка постинга в группу {group_url}: {e}")
+        take_screenshot("post_general_error")
+
+# Основной поток
 def main():
     try:
         logger.info("🚀 Начинаю работу")
@@ -169,6 +216,7 @@ def main():
         driver.find_element(By.CSS_SELECTOR, "input[type='submit']").click()
         time.sleep(2)
         try_confirm_identity()
+        # SMS-верификация и остальные шаги логина
         try_sms_verification()
         logger.info("🎉 Вход выполнен")
 
@@ -178,26 +226,25 @@ def main():
         for i, g in enumerate(groups, 1):
             logger.info(f"📝 Публикую в группу {i}/{len(groups)}: {g}")
             post_to_group(g, video_file, video_url, post_text)
+            if i < len(groups):
+                time.sleep(3)
 
-        # Небольшая пауза между публикациями в разные группы
-        if i < len(groups):
-            time.sleep(3)
-            # Удаляем временный файл, если он был создан
-            if video_file and os.path.exists(video_file):
-                try:
-                    os.unlink(video_file)
-                    logger.info("🗑️ Временный файл удален")
-                except Exception as e:
-                    logger.warning(f"⚠️ Не удалось удалить временный файл: {e}")
-            # Дополнительная очистка временных файлов
-            temp_dir = os.getenv('TEMP_VIDEO_DIR', tempfile.gettempdir())
-            if temp_dir != tempfile.gettempdir():
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+        # Очистка временных файлов
+        if video_file and os.path.exists(video_file):
+            try:
+                os.unlink(video_file)
+                logger.info("🗑️ Временный файл удален")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось удалить временный файл: {e}")
+        temp_dir = os.getenv('TEMP_VIDEO_DIR', tempfile.gettempdir())
+        if temp_dir != tempfile.gettempdir():
+            try:
+                import shutil
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
                     logger.info("🗑️ Временная папка очищена")
-                except Exception as e:
-                    logger.warning(f"⚠️ Не удалось очистить временную папку: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось очистить временную папку: {e}")
 
         logger.info("🎉 Все задачи выполнены")
     except Exception as e:
