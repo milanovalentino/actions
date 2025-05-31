@@ -549,9 +549,11 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
             # Ищем ссылку на опубликованный пост и отправляем в Telegram
             post_link = wait_for_post_link(timeout=30)
             if post_link:
-                send_post_link_to_telegram(post_link)
+                logger.info(f"✅ Получена ссылка на пост: {post_link}")
+                return post_link  # Возвращаем ссылку вместо отправки в Telegram
             else:
                 logger.warning("⚠️ Не удалось получить ссылку на пост")
+                return None
 
             time.sleep(5)
 
@@ -567,6 +569,7 @@ def post_to_group(group_url, video_file=None, video_url=None, text=""):
 def main():
     try:
         logger.info("🚀 Начинаю работу")
+        posted_links = []  # Список для хранения всех ссылок на посты
         driver.get("https://ok.ru/")
         wait.until(EC.presence_of_element_located((By.NAME,'st.email'))).send_keys(EMAIL)
         driver.find_element(By.NAME,'st.password').send_keys(PASSWORD)
@@ -583,11 +586,23 @@ def main():
 
         for i, g in enumerate(groups, 1):
             logger.info(f"📝 Публикую в группу {i}/{len(groups)}: {g}")
-            post_to_group(g, video_file, video_url, post_text)
+            post_link = post_to_group(g, video_file, video_url, post_text)  # Получаем ссылку
+            
+            if post_link:
+                posted_links.append(post_link)  # Сохраняем ссылку
 
             if i < len(groups):
                 time.sleep(3)
-
+                
+        # Отправляем все ссылки в Telegram после завершения постинга
+        if posted_links:
+            logger.info("📤 Отправляю все ссылки на посты в Telegram")
+            for link in posted_links:
+                send_post_link_to_telegram(link)
+                time.sleep(1)  # Небольшая задержка между отправками
+        else:
+            logger.warning("⚠️ Нет ссылок для отправки")
+        
         # Удаляем временный файл, если он был создан
         if video_file and os.path.exists(video_file):
             try:
